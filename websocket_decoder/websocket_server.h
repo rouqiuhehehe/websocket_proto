@@ -119,8 +119,6 @@ public:
     explicit Websocket_server(const std::string &server_addr = "0.0.0.0", int port_ = 8192, bool start_heartbeat = true);
     void register_recv_callback(Msg_callback_fn &&fn) override;
 
-    std::jthread check_heart_beat;
-
 private:
     bool decode_proto_data(tcp_client *, const std::string &data) override;
     tcp_client *allocate_client() const override;

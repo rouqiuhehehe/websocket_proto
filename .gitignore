@@ -1,0 +1,8 @@
+cmake-*
+.idea
+
+*.dll
+*.exe
+
+.qt
+bin

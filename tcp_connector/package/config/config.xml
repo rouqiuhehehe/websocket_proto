@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Installer>
+    <Name>TcpConnector</Name>
+    <Version>1.0.0</Version>
+    <Title>TcpConnector安装向导</Title>
+    <Publisher>varian</Publisher>
+    <!-- Directory name is used in component.xml -->
+    <StartMenuDir>TcpConnector</StartMenuDir>
+    <TargetDir>@HomeDir@/TcpConnector</TargetDir>
+</Installer>

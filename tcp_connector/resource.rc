@@ -1,0 +1,33 @@
+#include <windows.h>
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 1,0,0,0
+ PRODUCTVERSION 1,0,0,0
+ FILEFLAGSMASK 0x3fL
+ FILEFLAGS 0x0L
+ FILEOS 0x40004L
+ FILETYPE 0x1L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "080404B0"
+        BEGIN
+            VALUE "CompanyName",      "Varian"
+            VALUE "FileDescription",  "DecryptionQt Application"
+            VALUE "FileVersion",      "1.0.0"
+            VALUE "InternalName",     "DecryptionQt"
+            VALUE "OriginalFilename", "DecryptionQt.exe"
+            VALUE "ProductName",      "DecryptionQt"
+            VALUE "ProductVersion",   "1.0.0"
+            VALUE "LegalCopyright",   "Copyright © 2025"
+            VALUE "Author",           "Varian"   // 👈 可写
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0804, 1200
+    END
+END
+
+IDI_ICON1       ICON    DISCARDABLE     "assets/ico/Filosofem.ico"

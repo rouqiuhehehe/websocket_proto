@@ -1,0 +1,13 @@
+<RCC>
+    <qresource prefix="/">
+        <file alias="Filosofem.ico">assets/ico/Filosofem.ico</file>
+        <file>assets/ico/Filosofem2.ico</file>
+        <file alias="Filosofem.png">assets/ico/Filosofem.png</file>
+    </qresource>
+    <qresource prefix="/language">
+        <file alias="mylang.qm">assets/lang/mylang.qm</file>
+    </qresource>
+    <qresource prefix="/js">
+        <file alias="test.js">assets/script/test.js</file>
+    </qresource>
+</RCC>

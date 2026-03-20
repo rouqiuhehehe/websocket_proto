@@ -37,6 +37,7 @@ public:
 
 protected:
     void changeEvent(QEvent* event) override;
+    void keyReleaseEvent(QKeyEvent *event) override;
 
 private slots:
     void buttonClicked(QAbstractButton *);
@@ -48,7 +49,7 @@ private:
     void initTrayIcon();
 
     QSet<Connector *> connections_;
-    QSystemTrayIcon* trayIcon;
+    QSystemTrayIcon* trayIcon{};
 
     Ui::MainWindow *ui;
 };

@@ -18,6 +18,7 @@ protected:
     std::string server_addr_;
     int epoll_fd_ {};
     bool stop_ {};
+    Msg_callback_fn connected_f;
     Msg_callback_fn recv_f_;
     Msg_callback_fn disconnect_f_;
     std::unordered_map<int, tcp_client *> clients_;
@@ -34,6 +35,7 @@ public:
     void send_buffer(tcp_client *, const std::string &data) const;
 
     virtual void register_recv_callback(Msg_callback_fn &&fn);
+    virtual void register_connected_callback(Msg_callback_fn &&fn);
     void register_disconnect_callback(Msg_callback_fn &&fn);
 
 protected:

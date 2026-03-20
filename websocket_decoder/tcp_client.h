@@ -25,7 +25,7 @@ public:
     tcp_client() = default;
     tcp_client(Tcp_server *,const std::string &ip, int port, int sockfd);
 
-    virtual ~tcp_client() = default;
+    virtual ~tcp_client() noexcept = default;
 
     [[nodiscard]] std::string get_ip() const {
         return ip_;
@@ -40,7 +40,6 @@ public:
     }
 
     virtual void send(const std::string &send_buffer);
-    void send(std::string_view send_buffer);
 };
 
 #endif //WEBSOCKET_DECODER_TCP_CLIENT_H

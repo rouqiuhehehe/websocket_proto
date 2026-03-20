@@ -6,6 +6,7 @@
 #define WEBSOCKET_DECODER_WEBSOCKET_SERVER_H
 #include <thread>
 
+#include "http_server.h"
 #include "tcp_server.h"
 #include "time_wheel.h"
 
@@ -36,6 +37,7 @@ enum class opcode_flag : uint8_t {
     PONG = 0xA,
 };
 enum class close_flag : uint16_t {
+    SUCCESS = 0,
     NORMAL_CLOSE = 1000,
     GOING_AWAY = 1001,
     PROTOCOL_ERROR = 1002,
@@ -77,20 +79,20 @@ struct __attribute__((packed)) websocket_header {
     payload_mask payload;
 };
 
-class websocket_client : public tcp_client {
+class websocket_client final : public http_client {
     friend class Websocket_server;
 
-    bool is_fin_ = true;
+    bool is_streaming_ = false;
     bool is_connected_ = false;
     bool wait_close_ = false;
     size_t time_wheel_id_ {};
     size_t time_wheel_heartbeat_id_ {};
     std::string decode_buffer_;
-    std::unordered_map<std::string, std::string> header_;
+    websocket_header wb_header_;
 public:
-    using tcp_client::tcp_client;
+    using http_client::http_client;
 
-    ~websocket_client() override {
+    ~websocket_client() noexcept override {
         if (time_wheel_id_) {
             time_wheel::erase_task(time_wheel_id_);
         }
@@ -104,8 +106,8 @@ public:
     }
 
     [[nodiscard]] std::string_view get_path() const {
-        auto it = header_.find("path");
-        if (it != header_.end()) {
+        auto it = http_header_.find("path");
+        if (it != http_header_.end()) {
             return it->second;
         }
         return {};
@@ -114,10 +116,12 @@ public:
     void send(const std::string &send_buffer) override;
     void send_without_frame(const std::string &send_buffer);
 };
-class Websocket_server final : public Tcp_server {
+class Websocket_server final : public Http_server {
 public:
     explicit Websocket_server(const std::string &server_addr = "0.0.0.0", int port_ = 8192, bool start_heartbeat = true);
+    ~Websocket_server() override;
     void register_recv_callback(Msg_callback_fn &&fn) override;
+    void register_connected_callback(Msg_callback_fn &&fn) override;
 
 private:
     bool decode_proto_data(tcp_client *, const std::string &data) override;
@@ -125,7 +129,7 @@ private:
 
     void close_websocket_client(tcp_client *, close_flag) const;
 
-    static bool websocket_shake_hands(websocket_client *, const std::string &data);
+    bool websocket_shake_hands(websocket_client *, const std::string &data) const;
 
     static std::string websocket_accept_key(const std::string &wb_key);
     static std::string generate_websocket_shake_hands_res(const std::string &accept_key);
@@ -138,12 +142,16 @@ private:
 
     static std::string generate_websocket_pong_res(tcp_client *);
     static std::string generate_websocket_ping_res(tcp_client *);
+    static close_flag decode_websocket_data_frame(tcp_client *);
+
+    static bool validate_utf8(std::string_view);
 
     static constexpr auto default_expire_time = 10s;
     static constexpr auto default_heartbeat_time = 3s;
 
     // 是否开启心跳检测
     bool heartbeat_;
+    Msg_callback_fn wb_connected_f_;
 };
 
 

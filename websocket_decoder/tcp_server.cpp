@@ -28,8 +28,7 @@ Tcp_server::~Tcp_server() noexcept {
     close(listen_fd_);
 
     for (auto &tcp_client: clients_ | std::views::values) {
-        epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, tcp_client->sockfd_, nullptr);
-        delete tcp_client;
+        Tcp_server::close_client(tcp_client);
     }
     close(epoll_fd_);
 }
@@ -74,6 +73,9 @@ void Tcp_server::start(std::chrono::milliseconds timeout) {
                     auto client = decode_remote_client(&client_addr, remote_fd);
                     clients_.emplace(remote_fd, client);
 
+                    if (connected_f) {
+                        connected_f(client);
+                    }
                     ev.data.fd = remote_fd;
                     ev.events = EPOLLIN | EPOLLET;
                     epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, remote_fd, &ev);
@@ -150,6 +152,10 @@ void Tcp_server::register_recv_callback(Msg_callback_fn &&fn) {
     recv_f_ = std::forward<Msg_callback_fn>(fn);
 }
 
+void Tcp_server::register_connected_callback(Msg_callback_fn &&fn) {
+    connected_f = std::forward<Msg_callback_fn>(fn);
+}
+
 void Tcp_server::register_disconnect_callback(Msg_callback_fn &&fn) {
     disconnect_f_ = std::forward<Msg_callback_fn>(fn);
 }
@@ -157,7 +163,7 @@ void Tcp_server::register_disconnect_callback(Msg_callback_fn &&fn) {
 void Tcp_server::send_buffer(tcp_client *client, const std::string &data) const {
     client->send_buffer_ = data;
     epoll_event ev {};
-    ev.events = EPOLLOUT | EPOLLET;
+    ev.events = EPOLLIN | EPOLLOUT | EPOLLET;
     ev.data.fd = client->sockfd_;
     epoll_ctl(epoll_fd_, EPOLL_CTL_MOD, client->sockfd_, &ev);
 }

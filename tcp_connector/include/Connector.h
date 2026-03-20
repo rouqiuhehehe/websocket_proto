@@ -6,7 +6,7 @@
 #define QT_PROJECT__MYFORM_H_
 
 #include <QAbstractButton>
-#include <QWebSocket>
+#include <QAbstractSocket>
 QT_BEGIN_NAMESPACE
 
 namespace Ui
@@ -57,7 +57,7 @@ private:
     union {
         QTcpSocket *tcpSocket_;
         QWebSocket *webSocket_;
-    } socket_;
+    } socket_{};
     QString ip_;
     int port_;
     QString title_;

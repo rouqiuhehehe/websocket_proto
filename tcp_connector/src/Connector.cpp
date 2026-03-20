@@ -14,6 +14,7 @@
 #include <QDateTime>
 
 #include <QDebug>
+#include <QWebSocket>
 
 Connector::Connector(QWidget *parent, QString ip, int port, ConnectorType type)
     : QWidget(parent), ui(new Ui::Connector), ip_(std::move(ip)), port_(port), type_(type) {
@@ -113,6 +114,7 @@ void Connector::initTcpSocket() {
 
 void Connector::initWebSocket() {
     socket_.webSocket_ = new QWebSocket(QString(), QWebSocketProtocol::VersionLatest, this);
+    socket_.webSocket_->setOutgoingFrameSize(10);
     QUrl url;
     url.setScheme("ws");
     url.setHost(ip_);

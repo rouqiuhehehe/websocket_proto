@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <ranges>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <openssl/evp.h>
@@ -19,19 +20,33 @@
 #define WB_CLIENT(tcp_client) auto wb_client = reinterpret_cast<websocket_client *>(tcp_client);
 
 Websocket_server::Websocket_server(const std::string &server_addr, int port_, bool start_heartbeat)
-    : Tcp_server(server_addr, port_), heartbeat_(start_heartbeat) {
-    time_wheel::init_time_wheel();
+    : Http_server(server_addr, port_), heartbeat_(start_heartbeat) {
+    if (start_heartbeat) {
+        time_wheel::init_time_wheel();
+    }
+}
+
+Websocket_server::~Websocket_server() {
+    for (auto &client : clients_ | std::views::values) {
+        close_websocket_client(client, close_flag::GOING_AWAY);
+    }
 }
 
 bool Websocket_server::decode_proto_data(tcp_client *tcp_client, const std::string &data) {
-    Tcp_server::decode_proto_data(tcp_client, data);
-
     WB_CLIENT(tcp_client);
+    wb_client->recv_buffer_ = data;
     if (!wb_client->is_connected_) {
-        // 握手信息
-        if (websocket_shake_hands(wb_client, data) && heartbeat_) {
-            // 握手成功，且开启心跳检测
-            add_to_time_wheel_heartbeat(wb_client);
+        // 握手信息，基于http，解析http头部信息
+        if (!Http_server::decode_proto_data(tcp_client, data)) {
+            return false;
+        }
+        if (websocket_shake_hands(wb_client, data)) {
+            if (heartbeat_) {
+                add_to_time_wheel_heartbeat(wb_client);
+            }
+            if (wb_connected_f_) {
+                wb_connected_f_(wb_client);
+            }
         }
         return false;
     }
@@ -42,6 +57,7 @@ bool Websocket_server::decode_proto_data(tcp_client *tcp_client, const std::stri
         PROTO_ERR(close_flag::PROTOCOL_ERROR);
     }
     auto header = const_cast<websocket_header *>(reinterpret_cast<const websocket_header *>(origin_data));
+    wb_client->wb_header_ = *header;
     if (header->opcode.opcode == opcode_flag::CLOSE) {
         if (!wb_client->wait_close_) {
             // 已经添加到时间轮中等待检测关闭的socket，删除时间轮中的任务
@@ -69,54 +85,20 @@ bool Websocket_server::decode_proto_data(tcp_client *tcp_client, const std::stri
         wb_client->send_without_frame(generate_websocket_pong_res(wb_client));
         return false;
     }
-
-    const char *p = origin_data + sizeof(websocket_header);
-
-    uint64_t payload_len = 0;
-    if (header->payload.payload_len < PAYLOAD_2_FLAG) {
-        payload_len = header->payload.payload_len;
-    } else if (header->payload.payload_len == PAYLOAD_2_FLAG) {
-        if (wb_client->recv_buffer_.size() < sizeof(websocket_header) + 2) {
-            PROTO_ERR(close_flag::PROTOCOL_ERROR);
-        }
-        payload_len = *p << 8 | *(p + 1);
-        p += 2;
-    } else if (header->payload.payload_len == PAYLOAD_8_FLAG) {
-        if (wb_client->recv_buffer_.size() < sizeof(websocket_header) + 6) {
-            PROTO_ERR(close_flag::PROTOCOL_ERROR);
-        }
-        for (int i = 0; i < 8; ++i) {
-            payload_len = (payload_len << 8) | *(p + i);
-        }
-        p += 8;
-    } else {
-        PROTO_ERR(close_flag::PROTOCOL_ERROR);
-    }
-
-    if (payload_len + sizeof(websocket_header) > wb_client->recv_buffer_.size()) {
-        PROTO_ERR(close_flag::PROTOCOL_ERROR);
-    }
-    if (header->payload.mask) {
-        char mask[4] {};
-        for (int i = 0; i < 4; ++i) {
-            mask[i] = *(p + i);
-        }
-        p += 4;
-        uint32_t m = *reinterpret_cast<uint32_t *>(mask);
-        auto *pt = const_cast<uint32_t *>(reinterpret_cast<const uint32_t *>(p));
-        for (int i = 0; i <= payload_len / 4; ++i) {
-            pt[i] ^= m;
+    if (header->opcode.opcode == opcode_flag::TEXT_FRAME
+        || header->opcode.opcode == opcode_flag::BINARY_FRAME
+        || header->opcode.opcode == opcode_flag::CONTINUATION_FRAME) {
+        auto ret = decode_websocket_data_frame(wb_client);
+        if (ret != close_flag::SUCCESS) {
+            PROTO_ERR(ret);
         }
     }
 
-    wb_client->decode_buffer_.append(p, payload_len);
-    if (!header->opcode.fin) {
-        wb_client->is_fin_ = false;
+    if (!wb_client->wb_header_.opcode.fin) {
         // 此处数据没有接受完，防止外部callback调用
         return false;
     }
 
-    wb_client->is_fin_ = true;
     return true;
 }
 
@@ -183,67 +165,25 @@ void Websocket_server::register_recv_callback(Msg_callback_fn &&fn) {
 
         if (wb_client->is_connected_) {
             fn(wb_client);
-            wb_client->is_fin_ = false;
             wb_client->decode_buffer_.clear();
         }
     });
 }
 
-bool Websocket_server::websocket_shake_hands(websocket_client *wb_client, const std::string &data) {
-    const char *p = data.data();
-    const char *m = p;
-    const char *n = p;
-    // GET /chat HTTP/1.1
-    int i = 0;
-    while (*m != '\r' && *(m + 1) != '\n') {
-        if (*m == ' ') {
-            switch (i) {
-                case 0:
-                    wb_client->header_.emplace("method", std::string(n, m - n));
-                    break;
-                case 1:
-                    wb_client->header_.emplace("path", std::string(n, m - n));
-                    break;
-                default: ;
-            }
-            n = m + 1;
-            i++;
-        }
-        ++m;
-    }
-    m += 2;
-    n = m;
-    /*
-        Host: example.com:8000\r\n
-        Upgrade: websocket\r\n
-        Connection: Upgrade\r\n
-        Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n
-        Sec-WebSocket-Version: 13\r\n
-        Origin: http://example.com\r\n
-     */
-    while (true) {
-        while (*m != ':') ++m;
-        auto key = std::string_view(n, m - n);
-        m += 2;
-        n = m;
-        while (*m != '\r' && *(m + 1) != '\n') ++m;
-        auto value = std::string_view(n, m - n);
+void Websocket_server::register_connected_callback(Msg_callback_fn &&fn) {
+    wb_connected_f_ = std::forward<Msg_callback_fn>(fn);
+}
 
-        wb_client->header_.emplace(key, value);
-        m += 2;
-        n = m;
-        if (*m == '\r' && *(m + 1) == '\n') break;
-    }
-
-    auto upgrade = wb_client->header_.find("Upgrade");
-    auto connection = wb_client->header_.find("Connection");
-    if (upgrade != wb_client->header_.end()
+bool Websocket_server::websocket_shake_hands(websocket_client *wb_client, const std::string &data) const {
+    auto upgrade = wb_client->http_header_.find("Upgrade");
+    auto connection = wb_client->http_header_.find("Connection");
+    if (upgrade != wb_client->http_header_.end()
         && upgrade->second == "websocket"
-        && connection != wb_client->header_.end()
+        && connection != wb_client->http_header_.end()
         && connection->second == "Upgrade") {
         // 协议正确
-        auto wb_key = wb_client->header_.find("Sec-WebSocket-Key");
-        if (wb_key != wb_client->header_.end()) {
+        auto wb_key = wb_client->http_header_.find("Sec-WebSocket-Key");
+        if (wb_key != wb_client->http_header_.end()) {
             auto res = generate_websocket_shake_hands_res(websocket_accept_key(wb_key->second));
             wb_client->send_without_frame(res);
             wb_client->is_connected_ = true;
@@ -252,7 +192,7 @@ bool Websocket_server::websocket_shake_hands(websocket_client *wb_client, const 
     }
 
     std::cerr << "websocket proto error\n" << data << std::endl;
-    close(wb_client->sockfd_);
+    close_websocket_client(wb_client, close_flag::PROTOCOL_ERROR);
     return false;
 }
 
@@ -313,4 +253,109 @@ std::string Websocket_server::generate_websocket_ping_res(tcp_client *client) {
     header.opcode.opcode = opcode_flag::PING;
 
     return { reinterpret_cast<char *>(&header), sizeof(header) };
+}
+
+close_flag Websocket_server::decode_websocket_data_frame(tcp_client *client) {
+    WB_CLIENT(client);
+    const auto origin_data = wb_client->recv_buffer_.data();
+    auto p = const_cast<char *>(reinterpret_cast<const char *>(origin_data + sizeof(websocket_header)));
+
+    auto end = (wb_client->recv_buffer_.end()).operator->();
+    auto header = wb_client->wb_header_;
+    if (!header.opcode.fin) {
+        wb_client->is_streaming_ = true;
+    }
+    while (true) {
+        uint64_t payload_len = 0;
+        if (header.payload.payload_len < PAYLOAD_2_FLAG) {
+            payload_len = header.payload.payload_len;
+        } else if (header.payload.payload_len == PAYLOAD_2_FLAG) {
+            if (wb_client->recv_buffer_.size() < sizeof(websocket_header) + 2) {
+                return close_flag::PROTOCOL_ERROR;
+            }
+            payload_len = *p << 8 | *(p + 1);
+            p += 2;
+        } else if (header.payload.payload_len == PAYLOAD_8_FLAG) {
+            if (wb_client->recv_buffer_.size() < sizeof(websocket_header) + 6) {
+                return close_flag::PROTOCOL_ERROR;
+            }
+            for (int i = 0; i < 8; ++i) {
+                payload_len = (payload_len << 8) | *(p + i);
+            }
+            p += 8;
+        } else {
+            return close_flag::PROTOCOL_ERROR;
+        }
+
+        if (payload_len + sizeof(websocket_header) > wb_client->recv_buffer_.size()) {
+            return close_flag::PROTOCOL_ERROR;
+        }
+        if (header.payload.mask) {
+            char mask[4] {};
+            for (int i = 0; i < 4; ++i) {
+                mask[i] = *(p + i);
+            }
+            p += 4;
+            uint32_t m = *reinterpret_cast<uint32_t *>(mask);
+            auto *pt = const_cast<uint32_t *>(reinterpret_cast<const uint32_t *>(p));
+            for (int i = 0; i < payload_len / 4; ++i) {
+                pt[i] ^= m;
+            }
+            int offset = payload_len / 4 * sizeof(uint32_t);
+            for (int i = offset; i < offset + payload_len % 4; ++i) {
+                p[i] ^= mask[i % 4];
+            }
+        }
+        // 子曰：“克己复礼为仁。一日克己复礼，天下归仁焉。为仁由己，而由人乎哉？”(《颜渊》)
+        wb_client->decode_buffer_.append(p, payload_len);
+
+        if (header.opcode.fin || p >= end) {
+            break;
+        }
+        p += payload_len;
+        header = *const_cast<websocket_header *>(reinterpret_cast<const websocket_header *>(p));
+        p += 2;
+    }
+    if (wb_client->wb_header_.opcode.opcode == opcode_flag::TEXT_FRAME && wb_client->wb_header_.opcode.fin) {
+        if (!validate_utf8(wb_client->decode_buffer_)) {
+            return close_flag::INTERNAL_UTF8;
+        }
+    }
+
+    wb_client->wb_header_ = header;
+    return close_flag::SUCCESS;
+}
+
+bool Websocket_server::validate_utf8(std::string_view s) {
+    int remaining = 0;
+
+    for (unsigned char c: s) {
+        if (remaining == 0) {
+            if ((c >> 7) == 0b0) {
+                // 0xxxxxxx
+                continue;
+            }
+
+            if ((c >> 5) == 0b110) {
+                // 110xxxxx
+                remaining = 1;
+            } else if ((c >> 4) == 0b1110) {
+                // 1110xxxx
+                remaining = 2;
+            } else if ((c >> 3) == 0b11110) {
+                // 11110xxx
+                remaining = 3;
+            } else {
+                return false;
+            }
+        } else {
+            if ((c >> 6) != 0b10) {
+                // 10xxxxxx
+                return false;
+            }
+            remaining--;
+        }
+    }
+
+    return remaining == 0;
 }

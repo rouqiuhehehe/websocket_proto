@@ -6,6 +6,8 @@
 
 #include "ui_MainWindow.h"
 #include "Mainwindow.h"
+
+#include <qevent.h>
 #include <QPushButton>
 #include <QIntValidator>
 #include <QMessageBox>
@@ -160,4 +162,11 @@ void MainWindow::changeEvent(QEvent *event) {
     if (event->type() == QEvent::WindowStateChange && windowState() == Qt::WindowMinimized) {
         trayIcon->showMessage("托盘", "dsadas");
     }
+}
+
+void MainWindow::keyReleaseEvent(QKeyEvent *event) {
+    if (event->key() == Qt::Key_Enter || event->key() == Qt::Key_Return) {
+        createConnections();
+    }
+    QWidget::keyReleaseEvent(event);
 }

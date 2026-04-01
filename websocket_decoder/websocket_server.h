@@ -4,11 +4,8 @@
 
 #ifndef WEBSOCKET_DECODER_WEBSOCKET_SERVER_H
 #define WEBSOCKET_DECODER_WEBSOCKET_SERVER_H
-#include <thread>
-
 #include "http_server.h"
 #include "tcp_server.h"
-#include "time_wheel.h"
 
 /**
  *
@@ -92,14 +89,7 @@ class websocket_client final : public http_client {
 public:
     using http_client::http_client;
 
-    ~websocket_client() noexcept override {
-        if (time_wheel_id_) {
-            time_wheel::erase_task(time_wheel_id_);
-        }
-        if (time_wheel_heartbeat_id_) {
-            time_wheel::erase_task(time_wheel_heartbeat_id_);
-        }
-    }
+    ~websocket_client() noexcept override;
 
     [[nodiscard]] std::string get_message() const override {
         return decode_buffer_;

@@ -3,6 +3,7 @@
 //
 
 #include "websocket_server.h"
+#include "time_wheel.h"
 
 #include <algorithm>
 #include <iostream>
@@ -27,7 +28,7 @@ Websocket_server::Websocket_server(const std::string &server_addr, int port_, bo
 }
 
 Websocket_server::~Websocket_server() {
-    for (auto &client : clients_ | std::views::values) {
+    for (auto &client: clients_ | std::views::values) {
         close_websocket_client(client, close_flag::GOING_AWAY);
     }
 }
@@ -123,6 +124,15 @@ void Websocket_server::close_websocket_client(tcp_client *client, close_flag fla
     if (heartbeat_ && wb_client->time_wheel_heartbeat_id_) {
         time_wheel::erase_task(wb_client->time_wheel_heartbeat_id_);
         wb_client->time_wheel_heartbeat_id_ = 0;
+    }
+}
+
+websocket_client::~websocket_client() noexcept {
+    if (time_wheel_id_) {
+        time_wheel::erase_task(time_wheel_id_);
+    }
+    if (time_wheel_heartbeat_id_) {
+        time_wheel::erase_task(time_wheel_heartbeat_id_);
     }
 }
 

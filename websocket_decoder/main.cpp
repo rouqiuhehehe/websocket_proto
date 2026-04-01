@@ -6,7 +6,7 @@
 #include "tcp_server.h"
 #include "websocket_server.h"
 #include <fmt/format.h>
-// TIP 要<b>Run</b>代码，请按 <shortcut actionId="Run"/> 或点击装订区域中的 <icon src="AllIcons.Actions.Execute"/> 图标。
+
 int main() {
     Websocket_server wb_server { "0.0.0.0", 8192, false };
 

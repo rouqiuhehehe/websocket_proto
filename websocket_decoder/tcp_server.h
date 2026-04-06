@@ -12,6 +12,7 @@ using namespace std::chrono_literals;
 struct sockaddr;
 
 class Tcp_server {
+    friend class tcp_client;
 protected:
     int listen_fd_ {};
     int port_;
@@ -21,6 +22,7 @@ protected:
     Msg_callback_fn connected_f;
     Msg_callback_fn recv_f_;
     Msg_callback_fn disconnect_f_;
+    Msg_callback_fn sent_f_;
     std::unordered_map<int, tcp_client *> clients_;
 
 public:
@@ -36,7 +38,8 @@ public:
 
     virtual void register_recv_callback(Msg_callback_fn &&fn);
     virtual void register_connected_callback(Msg_callback_fn &&fn);
-    void register_disconnect_callback(Msg_callback_fn &&fn);
+    virtual void register_disconnect_callback(Msg_callback_fn &&fn);
+    virtual void register_sent_callback(Msg_callback_fn &&fn);
 
 protected:
     virtual bool encode_proto_data(tcp_client *, const std::string &data);
@@ -44,6 +47,8 @@ protected:
     virtual tcp_client* allocate_client() const;
 
     virtual void close_client(tcp_client *);
+    virtual void event_loop_once();
+
 private:
     void init_tcp_server();
     void init_epoll();

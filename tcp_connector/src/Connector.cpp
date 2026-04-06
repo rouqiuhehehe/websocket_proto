@@ -15,13 +15,14 @@
 
 #include <QDebug>
 #include <QWebSocket>
+#include "EventBus.h"
 
-Connector::Connector(QWidget *parent, QString ip, int port, ConnectorType type)
-    : QWidget(parent), ui(new Ui::Connector), ip_(std::move(ip)), port_(port), type_(type) {
+Connector::Connector(QWidget *parent, const QString &ip, int port, const QString &path, ConnectorType type)
+    : QWidget(parent), ui(new Ui::Connector), ip_(ip), port_(port), path_(path), type_(type) {
     ui->setupUi(this);
 
     setWindowFlag(Qt::Window);
-    title_ = tr("%1:%2").arg(ip_).arg(port_);
+    title_ = tr("%1:%2%3").arg(ip_).arg(port_).arg(path_);
 
     switch (type_) {
         case ConnectorType::TCP:
@@ -33,15 +34,12 @@ Connector::Connector(QWidget *parent, QString ip, int port, ConnectorType type)
             initWebSocket();
             break;
     }
+
+    connect(&EventBus::instance(), &EventBus::closeAllErrBox, this, &QWidget::close);
 }
 
 Connector::~Connector() {
     delete ui;
-    if (type_ == ConnectorType::TCP) {
-        delete socket_.tcpSocket_;
-    } else {
-        delete socket_.webSocket_;
-    }
 }
 
 void Connector::closeEvent(QCloseEvent *event) {
@@ -119,6 +117,7 @@ void Connector::initWebSocket() {
     url.setScheme("ws");
     url.setHost(ip_);
     url.setPort(port_);
+    url.setPath(path_);
 
     connect(socket_.webSocket_, &QWebSocket::connected, this, &Connector::onConnected);
     connect(socket_.webSocket_, &QWebSocket::textMessageReceived, this, &Connector::onMessageReceivedByWebSocket);
@@ -158,7 +157,10 @@ void Connector::onError(QAbstractSocket::SocketError) {
                                .arg(err),
                                QMessageBox::Ok,
                                this);
-    connect(box, &QMessageBox::accepted, this, &QWidget::close);
+    connect(box, &QMessageBox::finished, this, []() {
+        emit EventBus::instance().closeAllErrBox();
+    });
+
     box->setAttribute(Qt::WA_DeleteOnClose);
     box->show();
 }
@@ -190,7 +192,9 @@ void Connector::onDisconnected() {
                                tr("websocket关闭"),
                                QMessageBox::Ok,
                                this);
-    connect(box, &QMessageBox::accepted, this, &Connector::close);
+    connect(box, &QMessageBox::finished, this, []() {
+        emit EventBus::instance().closeAllErrBox();
+    });
     box->setAttribute(Qt::WA_DeleteOnClose);
     box->show();
 }

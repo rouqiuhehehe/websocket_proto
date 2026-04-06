@@ -7,6 +7,7 @@
 #include "http_server.h"
 #include "tcp_server.h"
 
+#define WB_CLIENT(tcp_client) auto wb_client = reinterpret_cast<websocket_client *>(tcp_client);
 /**
  *
 *   0                   1                   2                   3
@@ -77,10 +78,15 @@ struct __attribute__((packed)) websocket_header {
 };
 
 class websocket_client final : public http_client {
+    enum class connection_state : uint8_t {
+        NONE,
+        WAIT_SHAKE,
+        CONNECTED
+    };
     friend class Websocket_server;
 
     bool is_streaming_ = false;
-    bool is_connected_ = false;
+    connection_state is_connected_ = connection_state::NONE;
     bool wait_close_ = false;
     size_t time_wheel_id_ {};
     size_t time_wheel_heartbeat_id_ {};
@@ -104,14 +110,19 @@ public:
     }
 
     void send(const std::string &send_buffer) override;
+    void close() override;
+
+private:
     void send_without_frame(const std::string &send_buffer);
 };
 class Websocket_server final : public Http_server {
+    friend class websocket_client;
 public:
     explicit Websocket_server(const std::string &server_addr = "0.0.0.0", int port_ = 8192, bool start_heartbeat = true);
     ~Websocket_server() override;
     void register_recv_callback(Msg_callback_fn &&fn) override;
     void register_connected_callback(Msg_callback_fn &&fn) override;
+    void register_sent_callback(Msg_callback_fn &&fn) override;
 
 private:
     bool decode_proto_data(tcp_client *, const std::string &data) override;

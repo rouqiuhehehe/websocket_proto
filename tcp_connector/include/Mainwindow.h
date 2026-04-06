@@ -24,6 +24,7 @@ class Connector;
 struct MainWindowForm {
     QString ip;
     uint32_t port;
+    QString path;
     uint32_t num;
     ConnectorType connectorType;
 };

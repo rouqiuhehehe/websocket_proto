@@ -1,5 +1,6 @@
 #include <future>
 #include <iostream>
+#include <ranges>
 #include <shared_mutex>
 #include <unordered_set>
 
@@ -12,16 +13,16 @@ int main() {
 
     std::unordered_set<websocket_client *> wb_clients {};
     std::mutex mutex;
-    std::thread wb_ping_thread([&]() {
-        while (true) {
-            std::this_thread::sleep_for(std::chrono::seconds(3));
-            mutex.lock();
-            for (auto wb_client: wb_clients) {
-                wb_client->send(fmt::format("hello {}", wb_client->get_ip()));
-            }
-            mutex.unlock();
-        }
-    });
+    // std::thread wb_ping_thread([&]() {
+    //     while (true) {
+    //         std::this_thread::sleep_for(std::chrono::seconds(3));
+    //         mutex.lock();
+    //         for (auto wb_client: wb_clients) {
+    //             wb_client->send(fmt::format("hello {}", wb_client->get_ip()));
+    //         }
+    //         mutex.unlock();
+    //     }
+    // });
 
     wb_server.register_connected_callback([&](tcp_client *tcp_client) {
         auto wb_client = reinterpret_cast<websocket_client *>(tcp_client);
@@ -29,6 +30,10 @@ int main() {
 
         std::lock_guard lock(mutex);
         wb_clients.emplace(wb_client);
+
+        for (auto &v : wb_clients) {
+            v->send("hello world");
+        }
     });
 
     wb_server.register_recv_callback([&](tcp_client *tcp_client) {

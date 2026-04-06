@@ -19,7 +19,7 @@
 #include <memory>
 #define PRINT_ERR(fn_name) std::cerr << std::string(#fn_name" failed: ") + strerror(errno) << std::endl
 
-Tcp_server::Tcp_server(std::string server_addr, int port_) : server_addr_(std::move(server_addr)), port_(port_) {
+Tcp_server::Tcp_server(std::string server_addr, int port_) : port_(port_), server_addr_(std::move(server_addr)) {
     init_tcp_server();
     init_epoll();
 }
@@ -62,7 +62,12 @@ void Tcp_server::start(std::chrono::milliseconds timeout) {
 
         for (int i = 0; i < num; i++) {
             ev = event[i];
-            if (ev.events & EPOLLIN) {
+            if (ev.events & (EPOLLHUP | EPOLLRDHUP | EPOLLERR)) {
+                auto client = clients_.find(ev.data.fd);
+                if (client != clients_.end()) {
+                    close_client(client->second);
+                }
+            } else if (ev.events & EPOLLIN) {
                 if (ev.data.fd == listen_fd_) {
                     int remote_fd = accept(listen_fd_, &client_addr, &addr_len);
                     if (remote_fd == -1) {
@@ -113,34 +118,42 @@ void Tcp_server::start(std::chrono::milliseconds timeout) {
                     continue;
                 }
                 auto c = client->second;
-                while (true) {
-                    ret = send(ev.data.fd, c->send_buffer_.c_str(), c->send_buffer_.size(), 0);
-                    if (ret < 0) {
-                        if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                            // 发送缓冲区满
-                            // 等待 EPOLLOUT
+                while (!c->send_buffer_queue_.empty()) {
+                    auto send_buffer = c->send_buffer_queue_.front();
+                    c->send_buffer_queue_.pop();
+                    while (true) {
+                        ret = send(ev.data.fd, send_buffer.c_str(), send_buffer.size(), 0);
+                        if (ret < 0) {
+                            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                                // 发送缓冲区满
+                                // 等待 EPOLLOUT
+                                break;
+                            }
+                            // 其他错误
+                            close_client(c);
+                            PRINT_ERR(send);
                             break;
                         }
-                        // 其他错误
-                        close_client(c);
-                        PRINT_ERR(send);
-                        break;
+                        if (ret == 0) {
+                            close_client(c);
+                            break;
+                        }
+                        if (ret >= send_buffer.size()) {
+                            break;
+                        }
+                        send_buffer.erase(0, ret);
                     }
-                    if (ret == 0) {
-                        close_client(c);
-                        break;
-                    }
-                    if (ret >= c->send_buffer_.size()) {
-                        break;
-                    }
-                    c->send_buffer_.erase(0, ret);
                 }
-                c->send_buffer_.clear();
-                ev.events = EPOLLIN | EPOLLET;
+                ev.events = EPOLLIN | EPOLLRDHUP | EPOLLET;
                 ev.data.fd = c->sockfd_;
                 epoll_ctl(epoll_fd_, EPOLL_CTL_MOD, c->sockfd_, &ev);
+                if (sent_f_) {
+                    sent_f_(client->second);
+                }
             }
         }
+
+        event_loop_once();
     }
 }
 
@@ -160,10 +173,14 @@ void Tcp_server::register_disconnect_callback(Msg_callback_fn &&fn) {
     disconnect_f_ = std::forward<Msg_callback_fn>(fn);
 }
 
+void Tcp_server::register_sent_callback(Msg_callback_fn &&fn) {
+    sent_f_ = std::forward<Msg_callback_fn>(fn);
+}
+
 void Tcp_server::send_buffer(tcp_client *client, const std::string &data) const {
-    client->send_buffer_ = data;
+    client->send_buffer_queue_.emplace(data);
     epoll_event ev {};
-    ev.events = EPOLLIN | EPOLLOUT | EPOLLET;
+    ev.events = EPOLLIN | EPOLLOUT | EPOLLRDHUP | EPOLLET;
     ev.data.fd = client->sockfd_;
     epoll_ctl(epoll_fd_, EPOLL_CTL_MOD, client->sockfd_, &ev);
 }
@@ -175,7 +192,7 @@ bool Tcp_server::decode_proto_data(tcp_client *client, const std::string &data) 
     return true;
 }
 
-tcp_client * Tcp_server::allocate_client() const {
+tcp_client *Tcp_server::allocate_client() const {
     return new tcp_client;
 }
 
@@ -186,7 +203,7 @@ void Tcp_server::init_tcp_server() {
     }
     int opt = 1;
     // 设置bind 可重用socket
-    setsockopt(listen_fd_,SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    setsockopt(listen_fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
     // 设置非阻塞socket
     fcntl(listen_fd_, F_SETFL, O_NONBLOCK);
     sockaddr_in addr {
@@ -206,7 +223,7 @@ void Tcp_server::init_epoll() {
         throw std::runtime_error("epoll create failed");
     }
     epoll_event ev {};
-    ev.events = EPOLLIN | EPOLLET;
+    ev.events = EPOLLIN | EPOLLRDHUP | EPOLLET;
     ev.data.fd = listen_fd_;
 
     epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, listen_fd_, &ev);
@@ -239,3 +256,5 @@ void Tcp_server::close_client(tcp_client *client) {
     }
     delete client;
 }
+
+void Tcp_server::event_loop_once() {}

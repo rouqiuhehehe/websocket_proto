@@ -29,7 +29,8 @@ MainWindow::MainWindow(QWidget *parent) : QWidget(parent), ui(new Ui::MainWindow
 
     ui->lineEdit_ip->setText("192.168.56.103");
     ui->lineEdit_port->setText("8192");
-    ui->lineEdit_num->setText("1");
+    ui->lineEdit_path->setText("/chatroom/123");
+    ui->lineEdit_num->setText("2");
 
     ui->comboBox_proto->clear();
     ui->comboBox_proto->addItem("tcp", static_cast<int>(ConnectorType::TCP));
@@ -100,6 +101,7 @@ bool MainWindow::paramsValidator(MainWindowForm *form) {
     }
     form->ip = ip;
     form->port = port;
+    form->path = ui->lineEdit_path->text().trimmed();
     form->num = num;
     form->connectorType = static_cast<ConnectorType>(ui->comboBox_proto->currentData().toInt());
     return true;
@@ -114,7 +116,7 @@ void MainWindow::createConnections() {
     QRect screenGeometry = screen->availableGeometry();
     for (uint i = 0; i < form.num; i++) {
         constexpr int offset = 20;
-        auto *connector = new Connector(nullptr, form.ip, form.port, form.connectorType);
+        auto *connector = new Connector(nullptr, form.ip, form.port, form.path, form.connectorType);
         connections_.insert(connector);
 
         connect(connector, &Connector::windowClosed, this, [this, connector]() {

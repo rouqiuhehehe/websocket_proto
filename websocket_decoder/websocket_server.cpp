@@ -3,7 +3,7 @@
 //
 
 #include "websocket_server.h"
-#include "time_wheel.h"
+#include "private/time_wheel.h"
 
 #include <algorithm>
 #include <iostream>
@@ -18,13 +18,13 @@
     close_websocket_client(wb_client, flag);    \
     return false
 
-#define WB_CLIENT(tcp_client) auto wb_client = reinterpret_cast<websocket_client *>(tcp_client);
-
 Websocket_server::Websocket_server(const std::string &server_addr, int port_, bool start_heartbeat)
     : Http_server(server_addr, port_), heartbeat_(start_heartbeat) {
     if (start_heartbeat) {
         time_wheel::init_time_wheel();
     }
+
+    register_sent_callback({});
 }
 
 Websocket_server::~Websocket_server() {
@@ -36,7 +36,7 @@ Websocket_server::~Websocket_server() {
 bool Websocket_server::decode_proto_data(tcp_client *tcp_client, const std::string &data) {
     WB_CLIENT(tcp_client);
     wb_client->recv_buffer_ = data;
-    if (!wb_client->is_connected_) {
+    if (wb_client->is_connected_ == websocket_client::connection_state::NONE) {
         // 握手信息，基于http，解析http头部信息
         if (!Http_server::decode_proto_data(tcp_client, data)) {
             return false;
@@ -44,9 +44,6 @@ bool Websocket_server::decode_proto_data(tcp_client *tcp_client, const std::stri
         if (websocket_shake_hands(wb_client, data)) {
             if (heartbeat_) {
                 add_to_time_wheel_heartbeat(wb_client);
-            }
-            if (wb_connected_f_) {
-                wb_connected_f_(wb_client);
             }
         }
         return false;
@@ -165,6 +162,11 @@ void websocket_client::send(const std::string &send_buffer) {
     tcp_server_->send_buffer(this, send_buffer_);
 }
 
+void websocket_client::close() {
+    auto *wb_server = reinterpret_cast<Websocket_server *>(tcp_server_);
+    wb_server->close_websocket_client(this, close_flag::SERVER_ERROR);
+}
+
 void websocket_client::send_without_frame(const std::string &send_buffer) {
     tcp_client::send(send_buffer);
 }
@@ -173,7 +175,7 @@ void Websocket_server::register_recv_callback(Msg_callback_fn &&fn) {
     Tcp_server::register_recv_callback([&, fn](tcp_client *tcp_client) {
         WB_CLIENT(tcp_client);
 
-        if (wb_client->is_connected_) {
+        if (wb_client->is_connected_ == websocket_client::connection_state::CONNECTED) {
             fn(wb_client);
             wb_client->decode_buffer_.clear();
         }
@@ -182,6 +184,23 @@ void Websocket_server::register_recv_callback(Msg_callback_fn &&fn) {
 
 void Websocket_server::register_connected_callback(Msg_callback_fn &&fn) {
     wb_connected_f_ = std::forward<Msg_callback_fn>(fn);
+}
+
+void Websocket_server::register_sent_callback(Msg_callback_fn &&fn) {
+    Http_server::register_sent_callback([this, fn](tcp_client *tcp_client) {
+        WB_CLIENT(tcp_client);
+
+        if (wb_client->is_connected_ == websocket_client::connection_state::WAIT_SHAKE) {
+            wb_client->is_connected_ = websocket_client::connection_state::CONNECTED;
+            if (wb_connected_f_) {
+                wb_connected_f_(wb_client);
+            }
+        }
+
+        if (fn) {
+            fn(wb_client);
+        }
+    });
 }
 
 bool Websocket_server::websocket_shake_hands(websocket_client *wb_client, const std::string &data) const {
@@ -196,7 +215,7 @@ bool Websocket_server::websocket_shake_hands(websocket_client *wb_client, const 
         if (wb_key != wb_client->http_header_.end()) {
             auto res = generate_websocket_shake_hands_res(websocket_accept_key(wb_key->second));
             wb_client->send_without_frame(res);
-            wb_client->is_connected_ = true;
+            wb_client->is_connected_ = websocket_client::connection_state::WAIT_SHAKE;
             return true;
         }
     }

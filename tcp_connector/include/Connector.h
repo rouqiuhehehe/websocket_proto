@@ -27,7 +27,7 @@ class Connector final : public QWidget
     Q_OBJECT
 
 public:
-    Connector(QWidget* parent, QString ip, int port, ConnectorType type);
+    Connector(QWidget* parent, const QString &ip, int port, const QString &path, ConnectorType type);
     ~Connector() override;
 
 protected:
@@ -60,6 +60,7 @@ private:
     } socket_{};
     QString ip_;
     int port_;
+    QString path_;
     QString title_;
     ConnectorType type_;
     QString protocol_;

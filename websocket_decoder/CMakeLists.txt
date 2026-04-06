@@ -5,6 +5,8 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_VERBOSE_MAKEFILE ON)
 set(CMAKE_FIND_DEBUG_MODE ON)
 
+set(LIBRARY_OUTPUT_PATH ${CMAKE_BINARY_DIR}/bin)
+
 find_package(OpenSSL REQUIRED)
 find_package(fmt REQUIRED)
 
@@ -19,3 +21,12 @@ add_library(${PROJECT_NAME} SHARED ${SOURCE_SRC})
 
 target_link_libraries(${PROJECT_NAME} PRIVATE OpenSSL::Crypto fmt::fmt)
 target_link_libraries(${PROJECT_NAME}_test PRIVATE OpenSSL::Crypto fmt::fmt)
+file(GLOB HEADER_FILES ${CMAKE_CURRENT_SOURCE_DIR}/*.h)
+
+foreach(header ${HEADER_FILES})
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${header}
+            $<TARGET_FILE_DIR:${PROJECT_NAME}>
+    )
+endforeach()
